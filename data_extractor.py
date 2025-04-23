@@ -4,6 +4,7 @@ from os.path import dirname, abspath
 from typing import List
 from urllib.parse import urljoin
 import requests
+from fastapi import HTTPException
 from selenium import webdriver
 from bs4 import BeautifulSoup
 from selenium.webdriver.chrome.options import Options
@@ -16,17 +17,17 @@ sys.path.insert(0, dirname(dirname(abspath(__file__))))
 from settings import settings
 
 
-def get_info(category: str, N: int = 3) -> List[dict]:
+
+MAIN_URL = settings.URL
+
+
+def get_url_category(category: str) -> str:
     '''
-    Функция получения информации о промте по категории
+    Функция получения адресса для данной категории
     :param category: (str) - Название категории
-    :param N: (int) - Количество промтов из топа
-    :return: (dict) - Информация о популярных промтах в формате
+    :return: (str) - адресс категории
     '''
     url = settings.URL
-    MAIN_URL = settings.URL
-
-
 
     # Настраиваем драйвер
     driver = webdriver.Chrome()
@@ -60,16 +61,32 @@ def get_info(category: str, N: int = 3) -> List[dict]:
     for key, value in categories_dict.items():
         categories_dict[key] = MAIN_URL + value
 
-    print(list(categories_dict.keys()))
+    if category not in categories_dict:
+        raise HTTPException(
+            status_code=404,
+            detail="Сategory not found",
+        )
+    driver.close()
+    return categories_dict[category]
 
-    # Получаем ссылку на нужную нам категорию
-    url = categories_dict[category]
 
+def get_info_prompt(url_category: str, N: int = 3) -> List[dict]:
+    '''
+    Функция сбора информации о N промтах данной категории
+    :param url_category: (str) - адрес на категорию промта
+    :param N: (int) - количество промтов
+    :return: (List[dict]) - информацию о промтах
+    '''
     # Словарь с трендовыми промтами
     trending_prompts = dict()
 
+    # Настраиваем драйвер
+    driver = webdriver.Chrome()
+    driver.set_window_size(1920, 1080)
+
+
     # Получаем страницу с промтами и загружаем в словарь первые 20 трендовых промтов
-    driver.get(url)
+    driver.get(url_category)
     updated_element = WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.XPATH, "/html/body/app-root/app-category/div[1]/div[2]/item-top-list/div"))
     )
@@ -109,7 +126,6 @@ def get_info(category: str, N: int = 3) -> List[dict]:
             description = BeautifulSoup(description.get_attribute('innerHTML'), 'lxml').find('div', class_='content')
             description = description.get_text(strip=False)
         except Exception as s:
-            print(s)
             description = None
 
         # Получение цена
@@ -118,7 +134,6 @@ def get_info(category: str, N: int = 3) -> List[dict]:
             price = BeautifulSoup(price.get_attribute('innerHTML'), 'lxml')
             price = price.get_text(strip=False)
         except Exception as s:
-            print(s)
             price = None
 
         # Получение статистики
@@ -135,7 +150,6 @@ def get_info(category: str, N: int = 3) -> List[dict]:
                 bottom_name = stat.find('div', class_='item-stat-bottom').get_text(strip=True)
                 statistics[bottom_name] = top_value
         except Exception as s:
-            print(s)
             statistics = None
 
         # Получение превью в формате bytes64
@@ -143,11 +157,10 @@ def get_info(category: str, N: int = 3) -> List[dict]:
             preview = driver.find_element(By.CSS_SELECTOR, "preview-images")
             preview = BeautifulSoup(preview.get_attribute('innerHTML'), 'lxml')
             preview = preview.find('img')
-            preview = urljoin(url, preview['src'])
+            preview = urljoin(url_category, preview['src'])
             preview = requests.get(preview).content
             preview = base64.b64encode(preview).decode('utf-8')
         except Exception as s:
-            print(s)
             preview = None
 
         title = key
@@ -163,4 +176,5 @@ def get_info(category: str, N: int = 3) -> List[dict]:
         # Добавления промта в итоговый список
         result.append(info)
 
+    driver.close()
     return result
